@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   BookOpen, LogOut, Download, Clock, FileText, Trash2, Lock, 
   Plus, Users, Search, XCircle, Phone, Book, Settings, Upload, 
-  Image as ImageIcon, Key, CheckCircle, AlertCircle, X, Database, Save, Filter, MapPin, Pencil, Camera, ChevronDown, ChevronUp, Megaphone, Eye, EyeOff, Loader2, Wifi
+  Image as ImageIcon, Key, CheckCircle, AlertCircle, X, Filter, MapPin, Pencil, Camera, ChevronDown, ChevronUp, Megaphone, Eye, EyeOff, Loader2, Wifi
 } from 'lucide-react';
 
 // --- IMPORT FIREBASE ---
@@ -23,7 +23,6 @@ const firebaseConfig = {
 };
 
 // Inisialisasi Firebase
-// Cek agar tidak error jika config belum diisi user
 let db: any;
 try {
   const app = initializeApp(firebaseConfig);
@@ -32,10 +31,10 @@ try {
   console.error("Firebase Config belum diisi dengan benar.");
 }
 
-// --- KONSTANTA MAPEL & EKSKUL ---
+// --- KONSTANTA ---
 const MAPEL_LIST = [
   "Matematika", "Bahasa Inggris", "IPA", "IPS", "PKN", "PJOK", "BTQ", 
-  "B. Sunda", "B. Indonesia", "Bahasa Arab", "Al-Quran Hadis", "Fiqih", 
+  "B. Sunda", "B. Indonesia", "Bahasa Arab", "Al-Quran Hadis", "Fiqih",
   "Sejarah Kebudayaan Islam", "Seni Budaya", "BK", "TIK"
 ];
 
@@ -59,7 +58,6 @@ const compressImage = (file: File): Promise<string> => {
         const ctx = canvas.getContext('2d');
         if (ctx) {
             ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-            // Kualitas dikurangi jadi 0.6 agar ringan di database
             resolve(canvas.toDataURL('image/jpeg', 0.6));
         } else {
             reject(new Error("Canvas context null"));
@@ -264,7 +262,7 @@ export default function App() {
 
   const [currentView, setCurrentView] = useState<'LOGIN' | 'DASHBOARD' | 'ADMIN'>(currentUser ? (currentUser.role === 'Admin' ? 'ADMIN' : 'DASHBOARD') : 'LOGIN');
   
-  // Data State (Sekarang kosong, diisi oleh Firebase)
+  // Data State
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [users, setUsers] = useState<UserAccount[]>([]);
   const [schoolSettings, setSchoolSettings] = useState<SchoolSettings>({ 
@@ -302,19 +300,18 @@ export default function App() {
         }
     });
 
-    // 2. Listen Records (Urutkan dari terbaru)
+    // 2. Listen Records
     const qRecords = query(collection(db, "records"), orderBy("timestamp", "desc"));
     const unsubRecords = onSnapshot(qRecords, (snapshot) => {
         const recData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AttendanceRecord));
         setRecords(recData);
     });
 
-    // 3. Listen Settings (Pakai ID khusus 'config')
+    // 3. Listen Settings
     const unsubSettings = onSnapshot(doc(db, "settings", "school_config"), (docSnap) => {
         if (docSnap.exists()) {
             setSchoolSettings(docSnap.data() as SchoolSettings);
         } else {
-            // Create default if not exists
             setDoc(doc(db, "settings", "school_config"), {
                 name: 'MTS Plus Elyaqien', logo: '', restrictWifi: false, restrictLocation: false, radiusMeter: 50
             });
@@ -336,12 +333,11 @@ export default function App() {
     };
   }, []);
 
-  // Sync CurrentUser dengan data terbaru dari Firebase (jika ada perubahan role/password)
+  // Sync CurrentUser
   useEffect(() => {
     if (currentUser) {
         const syncedUser = users.find(u => u.id === currentUser.id);
         if (syncedUser) {
-            // Update session jika ada perubahan data user di database
             if (JSON.stringify(syncedUser) !== JSON.stringify(currentUser)) {
                 setCurrentUser(syncedUser);
                 localStorage.setItem('school_attendance_active_session', JSON.stringify(syncedUser));
@@ -352,7 +348,7 @@ export default function App() {
     }
   }, [users, currentUser]);
 
-  // --- ACTIONS (Kirim ke Firebase) ---
+  // --- ACTIONS ---
 
   const handleLogin = (user: UserAccount) => {
     setCurrentUser(user);
@@ -409,7 +405,6 @@ export default function App() {
 
   const clearDatabase = async () => {
     if (window.confirm('PERINGATAN: Hapus SEMUA riwayat absensi? (User tidak dihapus)')) {
-      // Di firestore client, hapus batch terbatas, jadi kita hapus satu2 untuk simpel
       records.forEach(async (r) => {
           await deleteDoc(doc(db, "records", r.id));
       });
@@ -456,7 +451,6 @@ export default function App() {
     <div className="min-h-screen bg-slate-50 font-sans text-slate-800">
       {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
       
-      {/* Modal Ganti Password Sendiri */}
       {showSelfPasswordModal && currentUser && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden">
@@ -545,7 +539,7 @@ export default function App() {
       <main className="max-w-6xl mx-auto p-4 mt-4 pb-20">
         <RunningText announcements={announcements} />
 
-        {currentView === 'LOGIN' && <LoginView users={users} onLogin={handleLogin} schoolName={schoolSettings.name} showToast={showToast} announcements={announcements} />}
+        {currentView === 'LOGIN' && <LoginView users={users} onLogin={handleLogin} schoolName={schoolSettings.name} showToast={showToast} />}
         {currentView === 'DASHBOARD' && currentUser && (
           <UserDashboard 
             user={currentUser} 
@@ -577,9 +571,9 @@ export default function App() {
   );
 }
 
-// --- SUB COMPONENTS (SAMA SEPERTI SEBELUMNYA, HANYA LOGIKA DISPLAY) ---
+// --- SUB COMPONENTS ---
 
-function LoginView({ users, onLogin, schoolName, showToast, announcements }: { users: UserAccount[], onLogin: (user: UserAccount) => void, schoolName: string, showToast: (msg: string, type: 'success' | 'error') => void, announcements: Announcement[] }) {
+function LoginView({ users, onLogin, schoolName, showToast }: { users: UserAccount[], onLogin: (user: UserAccount) => void, schoolName: string, showToast: (msg: string, type: 'success' | 'error') => void }) {
   const [role, setRole] = useState<UserRole>('Guru');
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
@@ -820,7 +814,7 @@ function UserDashboard({ user, onSubmit, history, showToast, schoolSettings, onU
   };
 
   const downloadMyReport = () => {
-    downloadExcelData(history, `Laporan_Saya_${user.name}.xls`, user.phone);
+    downloadExcelData(history, `Laporan_Saya_${user.name}.xls`);
   };
 
   return (
@@ -1107,7 +1101,7 @@ function AdminDashboard({
   const [activeTab, setActiveTab] = useState<'REPORT' | 'USERS' | 'SETTINGS' | 'INFO'>('REPORT');
   const [form, setForm] = useState({ name: '', role: 'Guru' as UserRole, password: '', phone: '', subjects: '' });
   const [tempSchoolName, setTempSchoolName] = useState(schoolSettings.name);
-  const [tempIp, setTempIp] = useState(schoolSettings.allowedIp || '');
+  // Hapus tempIp karena tidak digunakan lagi di UI ini (untuk menyederhanakan & fix error)
   const [modal, setModal] = useState<{user: UserAccount, pass: string} | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState<UserAccount | null>(null);
   const [selectedUserFilter, setSelectedUserFilter] = useState('ALL');
@@ -1303,7 +1297,7 @@ function AdminDashboard({
         });
         alert(`Lokasi tersimpan!\nLat: ${latitude}\nLng: ${longitude}`);
       },
-      (err) => {
+      () => {
         alert("Gagal mendapatkan lokasi. Pastikan GPS aktif.");
       },
       { enableHighAccuracy: true }
@@ -1644,7 +1638,7 @@ function AdminDashboard({
                   )}
                 </div>
 
-                <button onClick={() => { onUpdateSettings({...schoolSettings, name: tempSchoolName, allowedIp: tempIp}); showToast("Disimpan", 'success'); }} className="bg-blue-600 text-white px-6 py-2 rounded font-bold shadow hover:bg-blue-700 w-full">Simpan Perubahan</button>
+                <button onClick={() => { onUpdateSettings({...schoolSettings, name: tempSchoolName}); showToast("Disimpan", 'success'); }} className="bg-blue-600 text-white px-6 py-2 rounded font-bold shadow hover:bg-blue-700 w-full">Simpan Perubahan</button>
               </div>
             </div>
           </div>
@@ -1667,7 +1661,7 @@ function getTypeColor(type: AttendanceType) {
     default: return 'bg-gray-100 text-gray-700';
   }
 }
-function downloadExcelData(data: AttendanceRecord[], filename: string, phone: string | undefined) {
+function downloadExcelData(data: AttendanceRecord[], filename: string) {
     // Basic CSV download fallback
     const csvContent = "data:text/csv;charset=utf-8," 
         + "Nama,Role,Tipe,Waktu,Mapel/Ket\n"
