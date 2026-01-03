@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   BookOpen, LogOut, Download, Clock, FileText, Trash2, Lock, 
-  Plus, Users, Search, XCircle, Phone, Book, Settings, Upload, 
+  Plus, Users, Search, XCircle, Phone, Book, Settings, 
   Image as ImageIcon, Key, CheckCircle, AlertCircle, X, Filter, MapPin, Pencil, Camera, ChevronDown, ChevronUp, Megaphone, Eye, EyeOff, Loader2, Wifi, Database
 } from 'lucide-react';
 
@@ -11,7 +11,6 @@ const SUPABASE_URL = "https://ldqasynrlfcvdwzcftgb.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxkcWFzeW5ybGZjdmR3emNmdGdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0NDk4MDgsImV4cCI6MjA4MzAyNTgwOH0.dgFEllY2AEIAuHKbpHMvQy87APDTGVL4453EpbDjHw8";
 
 // --- Helper: Supabase Fetch Wrapper (Tanpa Library Tambahan) ---
-// Fungsi ini menggantikan @supabase/supabase-js agar tidak perlu npm install
 const supabaseFetch = async (endpoint: string, method: string = 'GET', body?: any) => {
   if (SUPABASE_URL.includes("ganti-dengan")) return { data: null, error: { message: "Config belum diisi" } };
 
@@ -19,7 +18,7 @@ const supabaseFetch = async (endpoint: string, method: string = 'GET', body?: an
     'apikey': SUPABASE_ANON_KEY,
     'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
     'Content-Type': 'application/json',
-    'Prefer': 'return=representation' // Agar return data setelah insert/update
+    'Prefer': 'return=representation'
   };
 
   try {
@@ -93,7 +92,7 @@ type UserRole = 'Guru' | 'Staf' | 'Admin';
 type AttendanceType = 'HADIR' | 'MASUK_KELAS' | 'INVAL' | 'KELUAR_KELAS' | 'IZIN' | 'PULANG';
 
 interface UserAccount {
-  id: string; // UUID/String
+  id: string;
   name: string;
   role: UserRole;
   password: string; 
@@ -305,7 +304,6 @@ export default function App() {
         if (userData && Array.isArray(userData) && userData.length > 0) {
             setUsers(userData as UserAccount[]);
         } else {
-            // Jika Database kosong, buat user Admin default
             console.log("Database user kosong. Membuat Admin default...");
             const defaultAdmin = {
                 name: 'Admin Sekolah',
@@ -315,10 +313,8 @@ export default function App() {
                 subjects: '-'
             };
             
-            // Insert ke Supabase
             await supabaseFetch('users', 'POST', defaultAdmin);
             
-            // Fetch lagi untuk memastikan user masuk
             const { data: newUserData } = await supabaseFetch('users?select=*');
             if (newUserData) setUsers(newUserData as UserAccount[]);
         }
@@ -327,10 +323,7 @@ export default function App() {
         const { data: recData } = await supabaseFetch('records?select=*&order=timestamp.desc&limit=500');
         if (recData) setRecords(recData as AttendanceRecord[]);
 
-        // 3. Fetch Settings (Simpel: dari local storage atau default untuk versi REST)
-        // Jika mau dari DB, buat table 'settings' di Supabase
-        
-        // 4. Fetch Announcements
+        // 3. Fetch Announcements
         const { data: annData } = await supabaseFetch('announcements?select=*&order=createdAt.desc');
         if (annData) setAnnouncements(annData as Announcement[]);
 
@@ -339,7 +332,6 @@ export default function App() {
 
     fetchData();
     
-    // Polling sederhana pengganti Realtime
     const interval = setInterval(fetchData, 30000); 
     return () => clearInterval(interval);
   }, []);
@@ -373,14 +365,12 @@ export default function App() {
         showToast(`Gagal absen: ${error.message || 'Error'}`, 'error');
     } else {
         showToast('Absensi berhasil dicatat (Cloud)', 'success');
-        // Refresh manual
         const { data } = await supabaseFetch('records?select=*&order=timestamp.desc&limit=500');
         if(data) setRecords(data);
     }
   };
 
   const addUser = async (userData: Omit<UserAccount, 'id'>) => {
-    // Validasi nama lokal dulu
     if (users.some(u => u.name.toLowerCase() === userData.name.toLowerCase())) {
         return showToast('Nama sudah ada!', 'error');
     }
@@ -459,7 +449,6 @@ export default function App() {
     <div className="min-h-screen bg-slate-50 font-sans text-slate-800">
       {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
       
-      {/* Modal Ganti Password Sendiri */}
       {showSelfPasswordModal && currentUser && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden">
@@ -567,8 +556,7 @@ export default function App() {
             users={users}
             schoolSettings={schoolSettings}
             announcements={announcements}
-            onUpdateSettings={setSchoolSettings} // Settings di handle lokal dl utk Supabase simpel
-            onClear={() => {}} // Disable clear all di mode cloud demi keamanan
+            onUpdateSettings={setSchoolSettings}
             onAddUser={addUser}
             onUpdateUser={updateUser}
             onDeleteUser={deleteUser}
@@ -583,8 +571,6 @@ export default function App() {
 }
 
 // --- SUB COMPONENTS (LOGIN, DASHBOARD, ADMIN) ---
-// Bagian ini sama persis secara UI, hanya logic data di atas yang berubah.
-// Saya sertakan full agar Anda tinggal copy paste tanpa pusing.
 
 function LoginView({ users, onLogin, schoolName, showToast }: { users: UserAccount[], onLogin: (user: UserAccount) => void, schoolName: string, showToast: (msg: string, type: 'success' | 'error') => void }) {
   const [role, setRole] = useState<UserRole>('Guru');
@@ -948,12 +934,12 @@ function UserDashboard({ user, onSubmit, history, showToast, schoolSettings, onU
 }
 
 function AdminDashboard({ 
-  records, users, schoolSettings, announcements, onUpdateSettings, onClear, 
+  records, users, schoolSettings, announcements, onUpdateSettings, 
   onAddUser, onUpdateUser, onDeleteUser, onAddAnnouncement, onDeleteAnnouncement,
   showToast
 }: { 
   records: AttendanceRecord[], users: UserAccount[], schoolSettings: SchoolSettings, announcements: Announcement[],
-  onUpdateSettings: (settings: SchoolSettings) => void, onClear: () => void, onAddUser: (user: Omit<UserAccount, 'id'>) => void, 
+  onUpdateSettings: (settings: SchoolSettings) => void, onAddUser: (user: Omit<UserAccount, 'id'>) => void, 
   onUpdateUser: (id: string, updates: Partial<UserAccount>) => void, onDeleteUser: (id: string) => void, 
   onAddAnnouncement: (text: string) => void, onDeleteAnnouncement: (id: string) => void,
   showToast: (msg: string, type: 'success' | 'error') => void
