@@ -12,7 +12,7 @@ import {
 } from "firebase/firestore";
 
 // --- KONFIGURASI FIREBASE ---
-// ⚠️ PENTING: GANTI DENGAN CONFIG DARI FIREBASE CONSOLE ANDA ⚠️
+// ⚠️ PASTIKAN KODE INI SUDAH ANDA GANTI DENGAN YANG ASLI DARI CONSOLE ⚠️
 const firebaseConfig = {
   apiKey: "AIzaSyCGBf8vlMrwQG1UczHQmsRjJT7HdCKvLBw",
   authDomain: "absensi-sekolah-online.firebaseapp.com",
@@ -24,11 +24,19 @@ const firebaseConfig = {
 
 // Inisialisasi Firebase
 let db: any;
+let configError = false;
+
 try {
-  const app = initializeApp(firebaseConfig);
-  db = getFirestore(app);
+  // Cek apakah user lupa mengganti config dummy
+  if (firebaseConfig.apiKey === "AIzaSyCGBf8vlMrwQG1UczHQmsRjJT7HdCKvLBw") {
+    configError = true;
+    console.error("STOP!! Config Firebase belum diganti.");
+  } else {
+    const app = initializeApp(firebaseConfig);
+    db = getFirestore(app);
+  }
 } catch (error) {
-  console.error("Firebase Config belum diisi dengan benar.");
+  console.error("Error Init Firebase:", error);
 }
 
 // --- KONSTANTA ---
@@ -128,7 +136,7 @@ interface Announcement {
 // --- Komponen Toast ---
 function Toast({ message, type, onClose }: { message: string, type: 'success' | 'error', onClose: () => void }) {
   useEffect(() => {
-    const timer = setTimeout(onClose, 3000);
+    const timer = setTimeout(onClose, 5000); // Diperlama jadi 5 detik agar terbaca
     return () => clearTimeout(timer);
   }, [onClose]);
 
@@ -253,7 +261,6 @@ const RunningText = ({ announcements }: { announcements: Announcement[] }) => {
 // --- Komponen Utama ---
 export default function App() {
   const [currentUser, setCurrentUser] = useState<UserAccount | null>(() => {
-    // Session tetap disimpan lokal agar tidak logout saat refresh
     try {
         const saved = localStorage.getItem('school_attendance_active_session');
         return saved ? JSON.parse(saved) : null;
@@ -281,56 +288,63 @@ export default function App() {
     setToast({ msg, type });
   };
 
-  // --- FIREBASE LISTENERS (Real-time Sync) ---
+  // --- FIREBASE LISTENERS ---
   useEffect(() => {
-    if (!db) return; // Tunggu db init
+    if (configError) {
+        setLoadingData(false);
+        return;
+    }
+    if (!db) return;
 
     setLoadingData(true);
 
-    // 1. Listen Users
-    const unsubUsers = onSnapshot(collection(db, "users"), (snapshot) => {
-        const usersData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as UserAccount));
-        setUsers(usersData);
-        
-        // Auto create admin jika kosong
-        if (usersData.length === 0) {
-            addDoc(collection(db, "users"), {
-                name: 'Admin Sekolah', role: 'Admin', password: 'admin', phone: '08123456789', subjects: ''
-            });
-        }
-    });
+    try {
+        const unsubUsers = onSnapshot(collection(db, "users"), (snapshot) => {
+            const usersData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as UserAccount));
+            setUsers(usersData);
+            
+            if (usersData.length === 0) {
+                // Jangan paksa write jika users kosong, karena bisa error permission
+                console.log("Database user kosong."); 
+            }
+        }, (err) => {
+            console.error("Error Fetch Users:", err);
+            if (err.code === 'permission-denied') {
+                showToast("Error: Database Terkunci (Permission Denied). Cek Firestore Rules.", 'error');
+            }
+        });
 
-    // 2. Listen Records
-    const qRecords = query(collection(db, "records"), orderBy("timestamp", "desc"));
-    const unsubRecords = onSnapshot(qRecords, (snapshot) => {
-        const recData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AttendanceRecord));
-        setRecords(recData);
-    });
+        const qRecords = query(collection(db, "records"), orderBy("timestamp", "desc"));
+        const unsubRecords = onSnapshot(qRecords, (snapshot) => {
+            const recData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AttendanceRecord));
+            setRecords(recData);
+        }, (err) => console.error("Error Fetch Records:", err));
 
-    // 3. Listen Settings
-    const unsubSettings = onSnapshot(doc(db, "settings", "school_config"), (docSnap) => {
-        if (docSnap.exists()) {
-            setSchoolSettings(docSnap.data() as SchoolSettings);
-        } else {
-            setDoc(doc(db, "settings", "school_config"), {
-                name: 'MTS Plus Elyaqien', logo: '', restrictWifi: false, restrictLocation: false, radiusMeter: 50
-            });
-        }
+        const unsubSettings = onSnapshot(doc(db, "settings", "school_config"), (docSnap) => {
+            if (docSnap.exists()) {
+                setSchoolSettings(docSnap.data() as SchoolSettings);
+            }
+            setLoadingData(false);
+        }, (err) => {
+            console.error("Error Fetch Settings:", err);
+            setLoadingData(false);
+        });
+
+        const unsubAnnounce = onSnapshot(collection(db, "announcements"), (snapshot) => {
+            const annData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Announcement));
+            setAnnouncements(annData);
+        }, (err) => console.error("Error Fetch Announcements:", err));
+
+        return () => {
+            unsubUsers();
+            unsubRecords();
+            unsubSettings();
+            unsubAnnounce();
+        };
+    } catch (e) {
+        console.error("Critical Error Listeners:", e);
         setLoadingData(false);
-    });
-
-    // 4. Listen Announcements
-    const unsubAnnounce = onSnapshot(collection(db, "announcements"), (snapshot) => {
-        const annData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Announcement));
-        setAnnouncements(annData);
-    });
-
-    return () => {
-        unsubUsers();
-        unsubRecords();
-        unsubSettings();
-        unsubAnnounce();
-    };
+    }
   }, []);
 
   // Sync CurrentUser
@@ -363,14 +377,21 @@ export default function App() {
   };
 
   const addRecord = async (recordData: Omit<AttendanceRecord, 'id' | 'timestamp'>) => {
+    if (configError) return showToast("Config Firebase belum diganti!", 'error');
     try {
         await addDoc(collection(db, "records"), {
             ...recordData,
             timestamp: new Date().toISOString()
         });
         showToast('Absensi berhasil dicatat (Online)', 'success');
-    } catch (e) {
-        showToast('Gagal koneksi ke server', 'error');
+    } catch (e: any) {
+        console.error("Error addRecord:", e);
+        // Tampilkan pesan error spesifik ke user
+        if (e.code === 'permission-denied') {
+            showToast('Gagal: Izin Ditolak. Cek Firestore Rules!', 'error');
+        } else {
+            showToast(`Gagal: ${e.message}`, 'error');
+        }
     }
   };
 
@@ -382,8 +403,8 @@ export default function App() {
     try {
         await addDoc(collection(db, "users"), userData);
         showToast('Pengguna ditambahkan ke Database', 'success');
-    } catch (e) {
-        showToast('Gagal menyimpan user', 'error');
+    } catch (e: any) {
+        showToast(`Gagal simpan user: ${e.message}`, 'error');
     }
   };
 
@@ -391,8 +412,8 @@ export default function App() {
     try {
         await updateDoc(doc(db, "users", id), updates);
         showToast('Data diperbarui!', 'success');
-    } catch (e) {
-        showToast('Gagal update', 'error');
+    } catch (e: any) {
+        showToast(`Gagal update: ${e.message}`, 'error');
     }
   };
 
@@ -437,12 +458,35 @@ export default function App() {
       showToast('Pengaturan disimpan ke Cloud', 'success');
   };
 
+  // --- TAMPILAN JIKA CONFIG BELUM DIGANTI ---
+  if (configError) {
+      return (
+          <div className="min-h-screen flex flex-col items-center justify-center bg-red-50 p-6 text-center">
+              <AlertCircle className="text-red-600 mb-4" size={60} />
+              <h1 className="text-2xl font-bold text-red-800 mb-2">Konfigurasi Firebase Belum Diganti!</h1>
+              <p className="text-red-700 max-w-md">
+                  Anda belum mengganti kode <code>firebaseConfig</code> di file <code>App.tsx</code> dengan kode asli milik proyek Anda.
+              </p>
+              <div className="mt-6 bg-white p-4 rounded border border-red-200 text-left text-sm text-slate-600">
+                  <p className="font-bold mb-1">Cara Memperbaiki:</p>
+                  <ol className="list-decimal pl-5 space-y-1">
+                      <li>Buka Firebase Console &gt; Project Settings.</li>
+                      <li>Copy kode di bagian "Your apps".</li>
+                      <li>Buka file <code>src/App.tsx</code> di laptop.</li>
+                      <li>Paste kode tersebut menggantikan variabel <code>firebaseConfig</code>.</li>
+                      <li>Jalankan <code>git push</code> untuk update.</li>
+                  </ol>
+              </div>
+          </div>
+      );
+  }
+
   if (loadingData) {
       return (
           <div className="min-h-screen flex items-center justify-center bg-slate-50 flex-col gap-4">
               <Loader2 className="animate-spin text-blue-600" size={40} />
               <p className="text-slate-500 font-medium">Menghubungkan ke Database Sekolah...</p>
-              {!db && <p className="text-red-500 bg-red-100 p-2 rounded text-xs mt-2 max-w-md text-center">Config Firebase belum dipasang. Edit file App.tsx dan masukkan API Key.</p>}
+              {!db && <p className="text-red-500 bg-red-100 p-2 rounded text-xs mt-2 max-w-md text-center">Menunggu koneksi...</p>}
           </div>
       );
   }
@@ -582,7 +626,18 @@ function LoginView({ users, onLogin, schoolName, showToast }: { users: UserAccou
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (configError) return showToast("Config Error! Lihat layar.", 'error');
     if (!name || !password) return showToast('Mohon lengkapi data', 'error');
+
+    // Jika user kosong, mungkin DB belum load atau kosong.
+    if (users.length === 0) {
+        // Backdoor untuk login pertama kali jika DB kosong
+        if (name === 'Admin' && password === 'admin') {
+            onLogin({ id: 'temp-admin', name: 'Admin Sekolah', role: 'Admin', password: 'admin', phone: '', subjects: '' });
+            return;
+        }
+        return showToast('Database pengguna kosong/belum termuat.', 'error');
+    }
 
     const userFound = users.find(u => 
       u.name.toLowerCase() === name.toLowerCase() && 
@@ -1101,7 +1156,6 @@ function AdminDashboard({
   const [activeTab, setActiveTab] = useState<'REPORT' | 'USERS' | 'SETTINGS' | 'INFO'>('REPORT');
   const [form, setForm] = useState({ name: '', role: 'Guru' as UserRole, password: '', phone: '', subjects: '' });
   const [tempSchoolName, setTempSchoolName] = useState(schoolSettings.name);
-  // Hapus tempIp karena tidak digunakan lagi di UI ini (untuk menyederhanakan & fix error)
   const [modal, setModal] = useState<{user: UserAccount, pass: string} | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState<UserAccount | null>(null);
   const [selectedUserFilter, setSelectedUserFilter] = useState('ALL');
@@ -1110,6 +1164,7 @@ function AdminDashboard({
   
   const handleAdd = (e: React.FormEvent) => {
     e.preventDefault();
+    if (configError) return showToast("Config Error! Lihat layar.", 'error');
     if (!form.name || !form.password) return showToast("Nama & Password wajib", 'error');
     onAddUser({
         name: form.name,
